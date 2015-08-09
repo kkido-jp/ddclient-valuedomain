@@ -1,0 +1,120 @@
+--- /usr/sbin/ddclient.org	2015-02-12 02:00:25.000000000 +0900
++++ /usr/sbin/ddclient	2015-08-09 10:57:38.350375910 +0900
+@@ -436,6 +436,15 @@
+     },
+ );
+ my %services = (
++    'valuedomain' => {
++	'updateable' => undef,
++	'update'     => \&nic_valuedomain_update,
++	'examples'   => \&nic_valuedomain_examples,
++	'variables'  => merge(
++			  { 'server'       => setv(T_FQDNP,  1, 0, 1, 'dyn.value-domain.com',   undef)    },
++			  $variables{'service-common-defaults'},
++		        ),
++    },
+     'dyndns1' => {
+ 	'updateable' => \&nic_dyndns2_updateable,
+ 	'update'     => \&nic_dyndns1_update,
+@@ -2246,6 +2255,101 @@
+     return $ok;
+ }
+ ######################################################################
++## nic_valuedomain_examples
++######################################################################
++sub nic_valuedomain_examples {
++    return <<EoEXAMPLE;
++
++o 'valuedomain'
++
++The 'valuedomain' protocol is used by DNS services offered by www.value-domain.com.
++
++Configuration variables applicable to the 'valuedomain' protocol are:
++  protocol=valuedomain         ## 
++  server=fqdn.of.service       ## defaults to dyn.value-domain.com
++  login=my-domain.name         ## your domain name and password  registered with the service
++  password=service-password    ## 
++  host                         ## the host registered with the service.
++
++Example ${program}.conf file entries:
++  ## single host update
++  protocol=valuedomain,                                          \\
++  login=my-domain.name,                                          \\
++  password=my-domainname.com-password                            \\
++  myhost
++
++  ## single host update for wild (*.my-domain.name) support
++  protocol=valuedomain,                                          \\
++  login=my-domain.name,                                          \\
++  password=my-domainname.com-password                            \\
++  *
++
++  ## multiple host update
++  protocol=valuedomain,                                          \\
++  login=my-domain.name,                                          \\
++  password=my-domainname.com-password                            \\
++  myhost,my2ndhost
++
++EoEXAMPLE
++}
++######################################################################
++## nic_valuedomain_update
++##
++## written by Hideo Sato
++##
++## based on http://www.value-domain.com/ddns.php?action=howto
++## needs this url to update:
++## http://dyn.value-domain.com/cgi-bin/dyn.fcg?d=domain-name&p=password&h=hostname&i=IPaddress
++##
++######################################################################
++sub nic_valuedomain_update {
++
++
++    debug("\nnic_valuedomain_update -------------------");
++
++    ## update each configured host
++    foreach my $h (@_) {
++	my $ip = delete $config{$h}{'wantip'};
++        info("setting IP address to %s for %s", $ip, $h);
++        verbose("UPDATE:","updating %s", $h);
++
++        my $url;
++        $url   = "http://$config{$h}{'server'}/cgi-bin/dyn.fcg";
++        $url  .= "?d=$config{$h}{'login'}";
++        $url  .= "&p=$config{$h}{'password'}";
++        $url  .= "&h=$h";
++        $url  .= "&i=";
++        $url  .= $ip if $ip;
++
++        my $reply = geturl(opt('proxy'), $url);
++        if (!defined($reply) || !$reply) {
++            failed("updating %s: Could not connect to %s.", $h, $config{$h}{'server'});
++            last;
++        }
++        last if !header_ok($h, $reply);
++
++	my @reply = split /\n/, $reply;
++	my ($return_code, $return_description) = ('','');
++	foreach my $line (@reply) {
++	    $return_code = $1 if $line =~ m%^status=(.*)\s*$%i;
++	    $return_description = $line;
++	}
++	
++	if ($return_code !~ /0/) {
++	    $config{$h}{'status'} = 'failed';
++	    warning("SENT:    %s", $url) unless opt('verbose');
++	    warning("REPLIED: %s", $reply);
++	    failed("updating %s", $h);
++	    
++	} else {
++	    $config{$h}{'ip'}     = $ip;
++	    $config{$h}{'mtime'}  = $now;
++	    $config{$h}{'status'} = 'good';
++	    success("updating %s: %s: %s: IP address set to %s", $h, $return_code, $return_description, $ip);
++	}
++    }
++}
++######################################################################
+ ## nic_dyndns1_examples
+ ######################################################################
+ sub nic_dyndns1_examples {
